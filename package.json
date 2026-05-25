@@ -1,0 +1,76 @@
+{
+  "name": "medikidney-app",
+  "version": "1.0.0",
+  "description": "Medikidney mobile application for dialysis patient management and clinical coordination.",
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "lint": "eslint . --ext .js,.jsx",
+    "format": "prettier --write ."
+  },
+  "keywords": [
+    "expo",
+    "react-native",
+    "healthcare",
+    "dialysis",
+    "mobile-app"
+  ],
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.3",
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-community/datetimepicker": "8.6.0",
+    "@react-native-picker/picker": "2.11.4",
+    "@react-navigation/bottom-tabs": "^6.5.20",
+    "@react-navigation/material-top-tabs": "^6.6.13",
+    "@react-navigation/native": "^6.1.17",
+    "@react-navigation/native-stack": "^6.9.26",
+    "@rneui/base": "^4.0.0-rc.7",
+    "@rneui/themed": "^4.0.0-rc.7",
+    "axios": "^1.13.5",
+    "expo": "~55.0.26",
+    "expo-device": "~55.0.17",
+    "expo-font": "~55.0.8",
+    "expo-haptics": "~55.0.14",
+    "expo-image-picker": "~55.0.19",
+    "expo-navigation-bar": "~55.0.13",
+    "expo-notifications": "~55.0.23",
+    "expo-splash-screen": "~55.0.21",
+    "expo-system-ui": "~55.0.18",
+    "prop-types": "^15.8.1",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "0.83.6",
+    "react-native-linear-gradient": "^2.8.3",
+    "react-native-pager-view": "8.0.0",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-screens": "~4.23.0",
+    "react-native-tab-view": "^4.3.0",
+    "react-native-vector-icons": "^10.3.0",
+    "react-native-web": "^0.21.0",
+    "yup": "^1.7.1"
+  },
+  "private": true,
+  "author": "Majed",
+  "license": "MIT",
+  "overrides": {
+    "@rneui/themed": {
+      "@rneui/base": "$@rneui/base"
+    },
+    "@rneui/base": {
+      "react-native-safe-area-context": "$react-native-safe-area-context"
+    }
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/eslint-parser": "^7.28.6",
+    "@babel/preset-react": "^7.28.5",
+    "eslint": "^8.57.1",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-native": "^5.0.0",
+    "prettier": "^3.0.0"
+  }
+}

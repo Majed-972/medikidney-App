@@ -1,0 +1,82 @@
+import React from 'react';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { Ionicons } from '@expo/vector-icons';
+import { StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLanguage } from '../../context/LanguageContext';
+
+import SearchPatient from '../patient/searchPatient';
+import ProfileSettingsScreen from '../SettingsWithProfile/SettingWithProfile';
+
+const Tab = createBottomTabNavigator();
+
+const NutritionistPages = () => {
+  const { t } = useLanguage();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View style={styles.container}>
+      <Tab.Navigator
+        screenOptions={({ route }) => ({
+          headerShown: false,
+          tabBarStyle: [
+            styles.tabBar,
+            { paddingBottom: Math.max(insets.bottom, 8), height: 60 + Math.max(insets.bottom, 8) },
+          ],
+          tabBarActiveTintColor: '#193B6B',
+          tabBarInactiveTintColor: '#8296B1',
+          tabBarLabelStyle: styles.tabLabel,
+          tabBarIcon: ({ color, focused }) => {
+            let iconName;
+            if (route.name === 'Search') {
+              iconName = focused ? 'search' : 'search-outline';
+            } else if (route.name === 'Settings') {
+              iconName = focused ? 'settings' : 'settings-outline';
+            }
+            return <Ionicons name={iconName} size={24} color={color} />;
+          },
+        })}
+      >
+        <Tab.Screen
+          name="Search"
+          component={SearchPatient}
+          options={{ title: t.nurseTabs.search }}
+        />
+        <Tab.Screen
+          name="Settings"
+          component={ProfileSettingsScreen}
+          options={{ title: t.nutritionistTabs.settings }}
+        />
+      </Tab.Navigator>
+    </View>
+  );
+};
+
+export default NutritionistPages;
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F9FAFB',
+    width: '100%',
+  },
+  tabBar: {
+    height: 70,
+    paddingBottom: 10,
+    paddingTop: 10,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 15,
+    borderTopWidth: 0,
+  },
+  tabLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+});

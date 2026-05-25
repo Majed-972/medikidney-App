@@ -1,0 +1,57 @@
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+.expo-shared/
+dist/
+web-build/
+expo-env.d.ts
+
+# native build outputs
+/ios
+android/.gradle/
+android/app/build/
+android/build/
+
+# release artifacts
+*.apk
+*.aab
+*.rar
+
+# local env files
+.env
+.env.*
+.env*.local
+google-services.json
+GoogleService-Info.plist
+
+# editor and OS files
+.idea/
+.vscode/
+.DS_Store
+
+# logs and temp
+*.log
+*.tmp
+*.cache
+eslint-*.txt
+lint-*.txt
+gradle-debug.log
+
+# Metro and TypeScript
+.metro-health-check*
+*.tsbuildinfo
+
+# signing and local distribution files
+*.orig.*
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+
+# Kotlin
+.kotlin/

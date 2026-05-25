@@ -1,0 +1,2059 @@
+import PropTypes from 'prop-types';
+import React, { useState, useCallback, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  StatusBar,
+  Dimensions,
+  TouchableOpacity,
+  Linking,
+  Alert,
+  TextInput,
+  Modal,
+} from 'react-native';
+import { Tab, TabView, Button, Icon, Divider } from '@rneui/base';
+import api from '../../services/api';
+import { useFocusEffect } from '@react-navigation/native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useLanguage } from '../../context/LanguageContext';
+import { useNotificationContext } from '../../context/NotificationContext';
+import { getVisibleUnreadCount } from '../../utils/notificationBadge';
+
+const { width } = Dimensions.get('window');
+
+const STATUS_CONFIG = {
+  COMPLETED: {
+    label: 'مكتملة',
+    bg: '#E9FAFB',
+    text: '#193B6B',
+    icon: 'check-circle-outline',
+    borderColor: '#26CDD6',
+  },
+  IN_PROGRESS: {
+    label: 'جارية',
+    bg: '#FBEAEA',
+    text: '#A32D2F',
+    icon: 'progress-clock',
+    borderColor: '#A32D2F',
+  },
+  SCHEDULED: {
+    label: 'مجدولة',
+    bg: '#E9FAFB',
+    text: '#193B6B',
+    icon: 'calendar-clock',
+    borderColor: '#26CDD6',
+  },
+};
+const DEFAULT_STATUS = {
+  label: '',
+  bg: '#f1f5f9',
+  text: '#8296B1',
+  icon: 'help-circle-outline',
+  borderColor: '#8296B1',
+};
+
+const EmptyBox = ({ icon, text }) => (
+  <View style={styles.emptyState}>
+    <Icon name={icon} type="material-community" size={60} color="#cbd5e1" />
+    <Text style={styles.emptyText}>{text}</Text>
+  </View>
+);
+
+EmptyBox.propTypes = {
+  icon: PropTypes.string.isRequired,
+  text: PropTypes.string,
+};
+
+const InfoItem = ({ label, value, icon, color = '#26CDD6' }) => {
+  const { t } = useLanguage();
+  return (
+    <View style={styles.infoBox}>
+      <Icon name={icon} type="material-community" size={22} color={color} />
+      <View style={{ marginRight: 12, flex: 1 }}>
+        <Text style={styles.infoLabel}>{label}</Text>
+        <Text style={styles.infoTextValue}>{value || t.unknown}</Text>
+      </View>
+    </View>
+  );
+};
+
+InfoItem.propTypes = {
+  label: PropTypes.string.isRequired,
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  icon: PropTypes.string.isRequired,
+  color: PropTypes.string,
+};
+
+const MealItem = ({ label, content, icon, color }) => {
+  const { t } = useLanguage();
+  return (
+    <View style={styles.mealBox}>
+      <View style={[styles.mealIconCircle, { backgroundColor: color + '20' }]}>
+        <Icon name={icon} type="material-community" size={20} color={color} />
+      </View>
+      <View style={{ marginRight: 12, flex: 1 }}>
+        <Text style={[styles.mealLabel, { color }]}>{label}</Text>
+        <Text style={styles.mealContent}>{content || t.patientProfile.noMeal}</Text>
+      </View>
+    </View>
+  );
+};
+
+MealItem.propTypes = {
+  label: PropTypes.string.isRequired,
+  content: PropTypes.string,
+  icon: PropTypes.string.isRequired,
+  color: PropTypes.string.isRequired,
+};
+
+const MedicalCard = ({
+  id,
+  type,
+  title,
+  date,
+  doctor,
+  description,
+  status,
+  hasFile,
+  typeIcon,
+  onDownload,
+  formatDate,
+}) => {
+  const { t } = useLanguage();
+  const isPending = status === 'PENDING' || status === 'pending';
+  return (
+    <View style={styles.reportCard}>
+      <View style={styles.reportHeader}>
+        <View style={styles.reportTitleRow}>
+          <Icon name={typeIcon} type="material-community" size={26} color="#193B6B" />
+          <Text style={styles.reportTitle}>{title}</Text>
+        </View>
+        <Text style={styles.reportDate}>{formatDate(date)}</Text>
+      </View>
+      <View style={styles.reportContent}>
+        <Text style={styles.reportDetail}>
+          <Text style={styles.boldLabel}>{t.patientProfile.doctor}:</Text> د. {doctor || t.unknown}
+        </Text>
+        <Text style={styles.reportDetail}>
+          <Text style={styles.boldLabel}>{t.patientProfile.description}:</Text>{' '}
+          {description || t.unknown}
+        </Text>
+        <View style={[styles.statusBadge, { backgroundColor: isPending ? '#FBEAEA' : '#E9FAFB' }]}>
+          <Text style={[styles.statusText, { color: isPending ? '#A32D2F' : '#193B6B' }]}>
+            {isPending ? t.patientProfile.status.pending : t.patientProfile.status.completed}
+          </Text>
+        </View>
+      </View>
+      <Button
+        title={t.patientProfile.previewFile}
+        icon={
+          <Icon
+            name="file-pdf-box"
+            type="material-community"
+            color="white"
+            size="20"
+            containerStyle={{ marginLeft: 5 }}
+          />
+        }
+        buttonStyle={styles.downloadBtn}
+        onPress={() => onDownload(id, type)}
+        disabled={!hasFile}
+      />
+    </View>
+  );
+};
+
+MedicalCard.propTypes = {
+  id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  type: PropTypes.string,
+  title: PropTypes.string,
+  date: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  doctor: PropTypes.string,
+  description: PropTypes.string,
+  status: PropTypes.string,
+  hasFile: PropTypes.bool,
+  typeIcon: PropTypes.string,
+  onDownload: PropTypes.func.isRequired,
+  formatDate: PropTypes.func.isRequired,
+};
+
+const getFluidRemoved = (session) => {
+  const settings = session.dialysisSettings || [];
+  const last = settings[settings.length - 1];
+  const uf = parseFloat(last?.ultrafiltration_rate ?? last?.ultrafiltrationRate);
+
+  if (!isNaN(uf) && uf > 0) {
+    return `${uf > 50 ? (uf / 1000).toFixed(2) : uf.toFixed(2)} L`;
+  }
+
+  if (session.fluid_removed > 0) return `${session.fluid_removed} L`;
+
+  if (session.weight_before != null && session.weight_after != null) {
+    return `${Math.abs(session.weight_before - session.weight_after).toFixed(1)} L`;
+  }
+
+  return '—';
+};
+
+const PatientProfile = ({ navigation, route }) => {
+  const { t } = useLanguage();
+  const { unreadCount, updateUnreadCount } = useNotificationContext();
+
+  const params = route?.params || {};
+  const initialTab = params.initialTab !== undefined ? params.initialTab : 0;
+  const initialSubTab = params.initialSubTab !== undefined ? params.initialSubTab : 0;
+
+  const [tabIndex, setTabIndex] = useState(initialTab);
+  const [subTabIndex, setSubTabIndex] = useState(initialSubTab);
+  const [patient, setPatient] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [nutritionPlan, setNutritionPlan] = useState(null);
+  const [sessions, setSessions] = useState([]);
+  const [prescriptions, setPrescriptions] = useState([]);
+  const [medicalTests, setMedicalTests] = useState([]);
+  const [radiology, setRadiology] = useState([]);
+  const [myAppointments, setMyAppointments] = useState([]);
+
+  const [pendingWeightSession, setPendingWeightSession] = useState(null);
+  const [weightAfterInput, setWeightAfterInput] = useState('');
+  const [weightAfterError, setWeightAfterError] = useState('');
+  const [isSavingWeight, setIsSavingWeight] = useState(false);
+
+  const fetchPatientData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const response = await api.get(`/users/profile`);
+
+      const patientInfo = response.data.patient;
+      setPatient(patientInfo);
+
+      if (patientInfo?.patient_id) {
+        const pId = patientInfo.patient_id;
+        await Promise.all([
+          fetchNutritionPlan(pId),
+          fetchSessions(pId),
+          fetchPrescriptions(pId),
+          fetchMedicalTests(pId),
+          fetchRadiology(pId),
+          fetchMyAppointments(),
+          fetchUnreadCount(),
+        ]);
+      }
+    } catch (error) {
+      console.log('Fetch Error:', error.message);
+      Alert.alert(t.error, t.patientProfile.fetchError);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchPatientData();
+
+      fetchUnreadCount();
+    }, [fetchPatientData])
+  );
+
+  useEffect(() => {
+    const newParams = route?.params || {};
+    if (newParams.initialTab !== undefined) {
+      setTabIndex(newParams.initialTab);
+    }
+    if (newParams.initialSubTab !== undefined) {
+      setSubTabIndex(newParams.initialSubTab);
+    }
+    console.log('🔔 تم استقبال إشعار:', {
+      initialTab: newParams.initialTab,
+      initialSubTab: newParams.initialSubTab,
+    });
+  }, [route?.params]);
+
+  const fetchMyAppointments = async () => {
+    try {
+      const response = await api.get(`/clinic-consultations`);
+      const activeAppts = (response.data || []).filter((a) => a.status !== 'CANCELLED');
+      setMyAppointments(activeAppts);
+    } catch (e) {
+      setMyAppointments([]);
+    }
+  };
+
+  const fetchUnreadCount = async () => {
+    try {
+      const count = await getVisibleUnreadCount(api);
+      updateUnreadCount(count);
+    } catch (error) {
+      console.error('Fetch unread count error (PatientProfile):', error);
+      updateUnreadCount(0);
+    }
+  };
+
+  const formatTime = (timeStr) => {
+    if (!timeStr) return '';
+    let [h, m] = timeStr.split(':');
+    let hh = parseInt(h);
+    return `${hh % 12 || 12}:${m} ${hh >= 12 ? t.time.pm : t.time.am}`;
+  };
+
+  const fetchNutritionPlan = async (id) => {
+    try {
+      const response = await api.get(`/nutrition-programs?patientId=${id}`);
+      if (response.data && response.data.length > 0) {
+        const sorted = response.data.sort((a, b) => (b.id || 0) - (a.id || 0));
+        setNutritionPlan(sorted[0]);
+      } else {
+        setNutritionPlan(null);
+      }
+    } catch (e) {
+      setNutritionPlan(null);
+    }
+  };
+
+  const fetchSessions = async (id) => {
+    try {
+      const response = await api.get(`/dialysis-sessions?patientId=${id}`);
+      console.log('Sessions response data:', response.data);
+      const sessionsList = Array.isArray(response.data) ? response.data : [];
+      console.log('Sessions list length:', sessionsList.length);
+      setSessions(sessionsList);
+
+      const needsWeight = sessionsList.find(
+        (s) => s.status === 'COMPLETED' && s.weight_after == null
+      );
+      if (needsWeight) {
+        setPendingWeightSession(needsWeight);
+      } else {
+        setPendingWeightSession(null);
+      }
+    } catch (e) {
+      console.log('fetchSessions Error:', e);
+      Alert.alert(t.error, e.message);
+      setSessions([]);
+    }
+  };
+
+  const handleSaveWeightAfter = async () => {
+    const num = parseFloat(weightAfterInput);
+    if (!weightAfterInput.trim()) {
+      setWeightAfterError(t.patientProfile.weightRequired);
+      return;
+    }
+    if (isNaN(num) || num < 20 || num > 300) {
+      setWeightAfterError(t.patientProfile.weightInvalid);
+      return;
+    }
+    setWeightAfterError('');
+
+    try {
+      setIsSavingWeight(true);
+      const sid = pendingWeightSession.session_id || pendingWeightSession.id;
+      await api.patch(`/dialysis-sessions/${sid}/status`, {
+        weightAfter: num,
+      });
+      Alert.alert(t.success, t.patientProfile.weightSaved);
+      setPendingWeightSession(null);
+      setWeightAfterInput('');
+
+      if (patient?.patient_id) {
+        fetchSessions(patient.patient_id);
+      }
+    } catch (err) {
+      console.log('Save weight err:', err.response?.data);
+      setWeightAfterError(t.patientProfile.weightSaveFailed);
+    } finally {
+      setIsSavingWeight(false);
+    }
+  };
+
+  const fetchPrescriptions = async (id) => {
+    try {
+      const response = await api.get(`/prescriptions?patientId=${id}`);
+      setPrescriptions(Array.isArray(response.data) ? response.data : []);
+    } catch (e) {
+      setPrescriptions([]);
+    }
+  };
+
+  const fetchMedicalTests = async (id) => {
+    try {
+      const response = await api.get(`/medical-tests?patientId=${id}`);
+      setMedicalTests(Array.isArray(response.data) ? response.data : []);
+    } catch (e) {
+      setMedicalTests([]);
+    }
+  };
+
+  const fetchRadiology = async (id) => {
+    try {
+      const response = await api.get(`/radiology-requests?patientId=${id}`);
+      setRadiology(Array.isArray(response.data) ? response.data : []);
+    } catch (e) {
+      setRadiology([]);
+    }
+  };
+
+  const formatDate = (date) => {
+    if (!date) return t.patientProfile.status.pending;
+    return new Date(date).toLocaleDateString(t.vitalSigns.now === 'الآن' ? 'ar-EG' : 'en-US', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  };
+
+  const handleDownload = async (id, type) => {
+    if (!id) {
+      Alert.alert('تنبيه', 'الملف غير متوفر حالياً');
+      return;
+    }
+
+    try {
+      const endpoint =
+        type === 'lab' ? `/medical-tests/${id}/result-url` : `/radiology-requests/${id}/file-url`;
+
+      const response = await api.get(endpoint);
+      const fullUrl = response.data.url;
+
+      if (!fullUrl) {
+        Alert.alert(t.error, t.failed);
+        return;
+      }
+
+      const supported = await Linking.canOpenURL(fullUrl);
+      if (supported) {
+        await Linking.openURL(fullUrl);
+      } else {
+        Alert.alert(t.error, t.failed);
+      }
+    } catch (e) {
+      console.log('Download Error:', e.message);
+      Alert.alert(t.error, t.failed);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#26CDD6" />
+        <Text style={styles.loadingText}>{t.patientProfile.loading}</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#193B6B" />
+
+      {pendingWeightSession && (
+        <Modal
+          visible={true}
+          transparent
+          animationType="slide"
+          onRequestClose={() => {
+            Alert.alert('⚠️ تنبيه', 'يجب إدخال وزنك بعد الجلسة قبل المتابعة.');
+          }}
+        >
+          <View style={weightLockStyles.overlay}>
+            <View style={weightLockStyles.sheet}>
+              <View style={weightLockStyles.iconWrap}>
+                <View style={weightLockStyles.iconCircle}>
+                  <MaterialCommunityIcons name="scale" size={40} color="#A32D2F" />
+                </View>
+              </View>
+
+              <Text style={weightLockStyles.title}>{t.patientProfile.weightAfterTitle}</Text>
+              <Text style={weightLockStyles.subtitle}>{t.patientProfile.weightAfterSubtitle}</Text>
+
+              <View style={weightLockStyles.sessionInfo}>
+                <Text style={weightLockStyles.sessionInfoText}>
+                  جلسة #{pendingWeightSession.session_id || pendingWeightSession.id}
+                  {' — '}
+                  {new Date(pendingWeightSession.date).toLocaleDateString('ar-EG', {
+                    day: 'numeric',
+                    month: 'short',
+                  })}
+                </Text>
+                {pendingWeightSession.weight_before != null && (
+                  <Text style={weightLockStyles.weightBeforeText}>
+                    {t.patientProfile.weightBefore}:{' '}
+                    <Text style={{ fontWeight: '800', color: '#26CDD6' }}>
+                      {pendingWeightSession.weight_before} kg
+                    </Text>
+                  </Text>
+                )}
+              </View>
+
+              <View
+                style={[
+                  weightLockStyles.inputRow,
+                  weightAfterError ? weightLockStyles.inputErr : null,
+                ]}
+              >
+                <MaterialCommunityIcons name="scale" size={22} color="#26CDD6" />
+                <TextInput
+                  style={weightLockStyles.input}
+                  placeholder="مثال: 72.5"
+                  placeholderTextColor="#8296B1"
+                  keyboardType="decimal-pad"
+                  value={weightAfterInput}
+                  onChangeText={(t) => {
+                    setWeightAfterInput(t);
+                    setWeightAfterError('');
+                  }}
+                  autoFocus
+                />
+                <Text style={weightLockStyles.unit}>kg</Text>
+              </View>
+              {weightAfterError ? (
+                <Text style={weightLockStyles.errText}>{weightAfterError}</Text>
+              ) : null}
+
+              <TouchableOpacity
+                style={[weightLockStyles.saveBtn, isSavingWeight && { backgroundColor: '#BCEFF3' }]}
+                onPress={handleSaveWeightAfter}
+                disabled={isSavingWeight}
+                activeOpacity={0.8}
+              >
+                {isSavingWeight ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <MaterialCommunityIcons name="content-save-check" size={20} color="#fff" />
+                    <Text style={weightLockStyles.saveBtnText}>{t.patientProfile.saveWeight}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      <View style={styles.modernHeader}>
+        <View style={styles.headerCircleOne} />
+        <View style={styles.headerCircleTwo} />
+
+        <View style={styles.topBar}>
+          <TouchableOpacity
+            style={styles.glassIconButton}
+            onPress={() => navigation.navigate('Notifications')}
+            activeOpacity={0.85}
+          >
+            <MaterialCommunityIcons name="bell" size={26} color="#fff" />
+            {unreadCount > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.glassIconButton}
+            onPress={() => navigation.navigate('PatientInfo', {})}
+            activeOpacity={0.85}
+          >
+            <Icon name="account-edit-outline" type="material-community" size={26} color="#fff" />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.patientHeaderRow}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('PatientInfo', {})}
+            activeOpacity={0.9}
+          >
+            <View style={styles.avatarRing}>
+              <View style={styles.avatarContainer}>
+                <Icon name="account" type="material-community" size={68} color="#193B6B" />
+              </View>
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.patientHeaderInfo}>
+            <Text style={styles.patientNameText}>{patient?.full_name || t.unknown}</Text>
+          </View>
+        </View>
+      </View>
+
+      <Tab
+        value={tabIndex}
+        onChange={setTabIndex}
+        indicatorStyle={styles.tabIndicator}
+        containerStyle={styles.tabBar}
+        variant="default"
+      >
+        {[
+          { title: t.patientProfile.tabs.nutrition, icon: 'food-apple' },
+          { title: t.patientProfile.tabs.sessions, icon: 'clock-outline' },
+          { title: t.patientProfile.tabs.tests, icon: 'clipboard-pulse' },
+          { title: t.patientProfile.tabs.appointments, icon: 'calendar-clock' },
+        ].map(({ title, icon }, i) => (
+          <Tab.Item
+            key={i}
+            title={title}
+            titleStyle={(active) => [styles.tabTitle, { color: active ? '#193B6B' : '#8296B1' }]}
+            titleProps={{
+              numberOfLines: 1,
+              adjustsFontSizeToFit: true,
+              minimumFontScale: 0.6,
+              allowFontScaling: false,
+            }}
+            icon={
+              <Icon
+                name={icon}
+                type="material-community"
+                size={18}
+                color={tabIndex === i ? '#193B6B' : '#8296B1'}
+              />
+            }
+          />
+        ))}
+      </Tab>
+
+      <TabView value={tabIndex} onChange={setTabIndex}>
+        <TabView.Item style={styles.tabViewContent}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollPadding}
+          >
+            <Text style={styles.sectionHeading}>{t.patientProfile.tabs.nutrition}</Text>
+
+            {nutritionPlan ? (
+              <View style={styles.nutritionCard}>
+                <View style={styles.planHeader}>
+                  <Text style={styles.planTitle}>{nutritionPlan.title || t.unknown}</Text>
+                  <Icon name="calendar-check" type="material-community" color="#fff" size={20} />
+                </View>
+
+                <View style={styles.planBody}>
+                  <View style={styles.dateInfoContainer}>
+                    <View style={styles.dateSubBox}>
+                      <Text style={styles.dateLabelText}>من تاريخ:</Text>
+                      <Text style={styles.dateValueText}>
+                        {formatDate(nutritionPlan.startDate || nutritionPlan.start_date)}
+                      </Text>
+                    </View>
+
+                    <Icon
+                      name="arrow-left-thin"
+                      type="material-community"
+                      size={20}
+                      color="#cbd5e1"
+                    />
+
+                    <View style={styles.dateSubBox}>
+                      <Text style={styles.dateLabelText}>إلى تاريخ:</Text>
+                      <Text style={styles.dateValueText}>
+                        {formatDate(nutritionPlan.endDate || nutritionPlan.end_date)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.descriptionSection}>
+                    <Text style={styles.descTitle}>وصف البرنامج:</Text>
+                    <Text style={styles.descContent}>
+                      {nutritionPlan.description || 'لا يوجد وصف'}
+                    </Text>
+                  </View>
+
+                  <Divider style={{ marginVertical: 15 }} />
+
+                  <MealItem
+                    label={t.patientProfile.meals.breakfast}
+                    content={nutritionPlan.breakfast}
+                    icon="coffee-outline"
+                    color="#A32D2F"
+                  />
+                  <MealItem
+                    label={t.patientProfile.meals.lunch}
+                    content={nutritionPlan.lunch}
+                    icon="food-turkey"
+                    color="#DE1A1C"
+                  />
+                  <MealItem
+                    label={t.patientProfile.meals.dinner}
+                    content={nutritionPlan.dinner}
+                    icon="weather-night"
+                    color="#26CDD6"
+                  />
+
+                  <Divider style={{ marginVertical: 15 }} />
+
+                  <InfoItem
+                    label="المسموحات"
+                    value={nutritionPlan.allowed_items || nutritionPlan.allowedItems}
+                    icon="check-decagram"
+                    color="#26CDD6"
+                  />
+                  <InfoItem
+                    label="الممنوعات"
+                    value={nutritionPlan.forbidden_items || nutritionPlan.forbiddenItems}
+                    icon="alert-octagon"
+                    color="#DE1A1C"
+                  />
+                </View>
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <Icon name="food-off-outline" type="material-community" size={60} color="#cbd5e1" />
+                <Text style={styles.emptyText}>{t.patientProfile.noNutritionPlan}</Text>
+              </View>
+            )}
+          </ScrollView>
+        </TabView.Item>
+
+        <TabView.Item style={styles.tabViewContent}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollPadding}
+          >
+            <Text style={styles.sectionHeading}>{t.patientProfile.tabs.sessions}</Text>
+
+            {sessions.length > 0 ? (
+              sessions.map((session, index) => {
+                const sc = STATUS_CONFIG[session.status] || {
+                  ...DEFAULT_STATUS,
+                  label: session.status,
+                };
+
+                const isActive = session.status === 'IN_PROGRESS' || session.status === 'PENDING';
+
+                return (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.sessionCard,
+                      { borderRightColor: sc.borderColor },
+                      isActive && styles.sessionCardActive,
+                    ]}
+                    onPress={() => {
+                      if (isActive) {
+                        navigation.navigate('PatientSessionScreen', {
+                          sessionId: session.session_id || session.id,
+                          patientName: patient?.full_name,
+                          startTime: session.created_at || session.start_time,
+                        });
+                      } else {
+                        if (!patient?.patient_id) {
+                          Alert.alert(t.error, 'خطأ: معرف المريض غير موجود');
+                          return;
+                        }
+                        navigation.navigate('PatientSessionDetailView', {
+                          sessionId: session.session_id || session.id,
+                          patientId: patient.patient_id,
+                        });
+                      }
+                    }}
+                    activeOpacity={0.75}
+                  >
+                    <View style={styles.sessionHeader}>
+                      <View style={styles.sessionDateBox}>
+                        <Icon
+                          name="calendar-range"
+                          type="material-community"
+                          size={15}
+                          color="#8296B1"
+                        />
+                        <Text style={styles.sessionDate}>{formatDate(session.date)}</Text>
+                      </View>
+
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <View style={[styles.sessionStatusBadge, { backgroundColor: sc.bg }]}>
+                          <Icon
+                            name={sc.icon}
+                            type="material-community"
+                            size={12}
+                            color={sc.text}
+                          />
+                          <Text style={[styles.sessionStatusText, { color: sc.text }]}>
+                            {sc.label}
+                          </Text>
+                        </View>
+                        <Text style={styles.sessionId}>#{session.session_id || session.id}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.sessionMetricsRow}>
+                      <View style={styles.sessionMetricBox}>
+                        <Icon name="scale" type="material-community" size={14} color="#26CDD6" />
+                        <Text style={styles.metricLabel}>الوزن قبل</Text>
+                        <Text style={[styles.metricValue, { fontSize: 13, color: '#26CDD6' }]}>
+                          {session.weight_before != null ? `${session.weight_before} kg` : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.sessionMetricDivider} />
+                      <View style={styles.sessionMetricBox}>
+                        <Icon name="scale" type="material-community" size={14} color="#26CDD6" />
+                        <Text style={styles.metricLabel}>الوزن بعد</Text>
+                        <Text style={[styles.metricValue, { fontSize: 13, color: '#26CDD6' }]}>
+                          {session.weight_after != null ? `${session.weight_after} kg` : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.sessionMetricDivider} />
+                      <View style={styles.sessionMetricBox}>
+                        <Icon name="water" type="material-community" size={14} color="#26CDD6" />
+                        <Text style={styles.metricLabel}>السوائل المسحوبة</Text>
+                        <Text style={[styles.metricValue, { fontSize: 13, color: '#26CDD6' }]}>
+                          {getFluidRemoved(session)}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.sessionTapHint}>
+                      {isActive ? (
+                        <View style={styles.activeSessionBanner}>
+                          <View style={styles.activeDot} />
+                          <Text style={styles.activeSessionText}>
+                            {t.patientProfile.status.pending} — {t.patientProfile.status.pending}
+                          </Text>
+                        </View>
+                      ) : (
+                        <>
+                          <Icon
+                            name={t.vitalSigns.now === 'الآن' ? 'chevron-left' : 'chevron-right'}
+                            type="material-community"
+                            size={16}
+                            color="#8296B1"
+                          />
+                          <Text style={styles.sessionTapHintText}>
+                            {t.patientProfile.previewFile}
+                          </Text>
+                        </>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            ) : (
+              <View style={styles.emptyState}>
+                <Icon name="database-off" type="material-community" size={50} color="#cbd5e1" />
+                <Text style={styles.emptyText}>{t.patientProfile.noSessions}</Text>
+              </View>
+            )}
+          </ScrollView>
+        </TabView.Item>
+
+        <TabView.Item style={styles.tabViewContent}>
+          <View style={{ flex: 1 }}>
+            <View style={styles.subTabContainer}>
+              {[t.medications.title, 'المختبر', 'الأشعة'].map((label, i) => (
+                <TouchableOpacity
+                  key={i}
+                  onPress={() => setSubTabIndex(i)}
+                  style={[styles.subTabItem, subTabIndex === i && styles.subTabActive]}
+                >
+                  <Text style={[styles.subTabText, subTabIndex === i && styles.subTextActive]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.scrollPadding}
+            >
+              {subTabIndex === 0 && (
+                <View>
+                  <Text style={styles.sectionHeading}>{t.medications.title}</Text>
+
+                  {prescriptions.length > 0 ? (
+                    prescriptions.map((item, idx) => {
+                      const isDispensed = item.dispense_status === 'DISPENSED';
+                      return (
+                        <View key={idx} style={styles.prescriptionCard}>
+                          <View style={styles.prescriptionHeader}>
+                            <View style={{ alignItems: 'flex-end' }}>
+                              <Text style={styles.prescriptionDoctor}>
+                                د. {item.doctor?.full_name}
+                              </Text>
+                              <View
+                                style={[
+                                  styles.statusBadge,
+                                  { backgroundColor: isDispensed ? '#E9FAFB' : '#FBEAEA' },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.statusText,
+                                    { color: isDispensed ? '#193B6B' : '#A32D2F' },
+                                  ]}
+                                >
+                                  {isDispensed
+                                    ? t.patientProfile.status.completed
+                                    : t.patientProfile.status.pending}
+                                </Text>
+                              </View>
+                            </View>
+                            <Text style={styles.prescriptionDate}>
+                              {formatDate(item.date_prescribed)}
+                            </Text>
+                          </View>
+
+                          <Divider style={{ marginVertical: 10 }} />
+
+                          {item.details?.map((drug, dIdx) => (
+                            <View
+                              key={dIdx}
+                              style={[
+                                styles.drugItem,
+                                {
+                                  borderRightWidth: 4,
+                                  borderRightColor: drug.is_active ? '#26CDD6' : '#8296B1',
+                                },
+                              ]}
+                            >
+                              <View style={styles.drugNameRow}>
+                                <Icon
+                                  name="pill"
+                                  type="material-community"
+                                  size={20}
+                                  color={drug.is_active ? '#193B6B' : '#8296B1'}
+                                />
+                                <Text
+                                  style={[
+                                    styles.drugName,
+                                    { color: drug.is_active ? '#193B6B' : '#8296B1' },
+                                  ]}
+                                >
+                                  {drug.drug_name}
+                                </Text>
+                              </View>
+                              <Text style={styles.drugInstructions}>{drug.instructions}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      );
+                    })
+                  ) : (
+                    <EmptyBox icon="pill-off" text={t.medications.noMeds} />
+                  )}
+                </View>
+              )}
+
+              {subTabIndex === 1 &&
+                (medicalTests.length > 0 ? (
+                  medicalTests.map((test, idx) => (
+                    <MedicalCard
+                      key={idx}
+                      id={test.test_id || test.id}
+                      type="lab"
+                      title={test.test_type}
+                      date={test.date_completed}
+                      doctor={test.doctor?.full_name}
+                      description={test.description}
+                      status={test.status || (test.result ? 'COMPLETED' : 'PENDING')}
+                      hasFile={!!(test.test_id || test.id)}
+                      typeIcon="test-tube"
+                      onDownload={handleDownload}
+                      formatDate={formatDate}
+                    />
+                  ))
+                ) : (
+                  <EmptyBox
+                    icon="test-tube-off"
+                    text={t.medications.noLabTests || 'لا توجد فحوصات مختبرية'}
+                  />
+                ))}
+
+              {subTabIndex === 2 &&
+                (radiology.length > 0 ? (
+                  radiology.map((rad, idx) => (
+                    <MedicalCard
+                      key={idx}
+                      id={rad.image_id || rad.id}
+                      type="radiology"
+                      title={rad.image_type}
+                      date={rad.completed_at}
+                      doctor={rad.doctor?.full_name}
+                      description={rad.description}
+                      status={rad.status}
+                      hasFile={!!(rad.image_id || rad.id)}
+                      typeIcon="file-image-outline"
+                      onDownload={handleDownload}
+                      formatDate={formatDate}
+                    />
+                  ))
+                ) : (
+                  <EmptyBox
+                    icon="radiology-box-outline"
+                    text={t.medications.noRadiology || 'لا توجد صور أشعة'}
+                  />
+                ))}
+            </ScrollView>
+          </View>
+        </TabView.Item>
+
+        <TabView.Item style={styles.tabViewContent}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollPadding}
+          >
+            <Text style={styles.sectionHeading}>{t.appointments.title}</Text>
+
+            <TouchableOpacity
+              style={styles.bookingPrimaryBtn}
+              onPress={() => navigation.navigate('DatesDoctor', { patientId: patient?.patient_id })}
+              activeOpacity={0.8}
+            >
+              <Icon name="calendar-plus" type="material-community" color="white" size={24} />
+              <Text style={styles.bookingPrimaryBtnText}>{t.appointments.title}</Text>
+            </TouchableOpacity>
+
+            <View style={{ marginTop: 25 }}>
+              <Text style={[styles.sectionHeading, { fontSize: 18, marginBottom: 15 }]}>
+                {t.appointments?.completedTitle || 'سجل المواعيد المكتملة'}
+              </Text>
+
+              {(() => {
+                const completed = myAppointments.filter((a) => a.status === 'COMPLETED');
+                if (completed.length === 0) {
+                  return (
+                    <View style={styles.emptyApptBox}>
+                      <Icon
+                        name="clipboard-check-outline"
+                        type="material-community"
+                        size={40}
+                        color="#cbd5e1"
+                      />
+                      <Text style={styles.emptyText}>
+                        {t.appointments?.noCompleted || 'لا توجد مواعيد مكتملة'}
+                      </Text>
+                    </View>
+                  );
+                }
+                return completed.map((appt, index) => (
+                  <TouchableOpacity
+                    key={appt.appointment_id || index}
+                    style={styles.completedApptCard}
+                    activeOpacity={0.7}
+                    onPress={() =>
+                      navigation.navigate('ConsultationDetails', { consultation: appt })
+                    }
+                  >
+                    <View style={styles.completedApptHeader}>
+                      <View style={styles.completedApptDocRow}>
+                        <View style={styles.completedApptAvatar}>
+                          <Icon
+                            name="stethoscope"
+                            type="material-community"
+                            size={20}
+                            color="#26CDD6"
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.completedApptDocName}>
+                            د. {appt.doctor?.full_name || '—'}
+                          </Text>
+                          <Text style={styles.completedApptType}>
+                            {appt.appointment_type === 'CLINIC_REVIEW'
+                              ? t.appointments.clinicReview || 'مراجعة عيادة'
+                              : appt.appointment_type}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.completedApptBadge}>
+                        <Icon
+                          name="check-circle"
+                          type="material-community"
+                          size={14}
+                          color="#26CDD6"
+                        />
+                        <Text style={styles.completedApptBadgeText}>
+                          {t.patientProfile?.status?.completed || 'مكتملة'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.completedApptDateRow}>
+                      <View style={styles.completedApptDateItem}>
+                        <Icon name="calendar" type="material-community" size={15} color="#8296B1" />
+                        <Text style={styles.completedApptDateText}>{appt.appt_date}</Text>
+                      </View>
+                      <View style={styles.completedApptDateItem}>
+                        <Icon
+                          name="clock-outline"
+                          type="material-community"
+                          size={15}
+                          color="#8296B1"
+                        />
+                        <Text style={styles.completedApptDateText}>
+                          {formatTime(appt.appt_time)}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.cardFooter}>
+                      <Text style={styles.viewDetailsText}>عرض التفاصيل الكاملة</Text>
+                      <Icon
+                        name="chevron-left"
+                        type="material-community"
+                        size={18}
+                        color="#26CDD6"
+                      />
+                    </View>
+                  </TouchableOpacity>
+                ));
+              })()}
+            </View>
+          </ScrollView>
+        </TabView.Item>
+      </TabView>
+    </View>
+  );
+};
+
+export default PatientProfile;
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F1FCFD',
+  },
+
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+
+  loadingText: {
+    marginTop: 12,
+    color: '#8296B1',
+  },
+
+  modernHeader: {
+    height: 235,
+    backgroundColor: '#193B6B',
+    borderBottomLeftRadius: 40,
+    borderBottomRightRadius: 40,
+    paddingHorizontal: 20,
+    paddingTop: 40,
+    overflow: 'hidden',
+    position: 'relative',
+    elevation: 14,
+    shadowColor: '#193B6B',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+  },
+
+  topBar: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    zIndex: 5,
+  },
+
+  patientHeaderRow: {
+    marginTop: 22,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    zIndex: 5,
+  },
+
+  patientHeaderInfo: {
+    flex: 1,
+    alignItems: 'flex-end',
+    marginRight: 14,
+  },
+
+  patientNameText: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#ffffff',
+    textAlign: 'right',
+  },
+
+  avatarRing: {
+    width: 102,
+    height: 102,
+    borderRadius: 51,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+
+  avatarContainer: {
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 4,
+    borderColor: '#BCEFF3',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+  },
+
+  headerCircleOne: {
+    position: 'absolute',
+    width: 190,
+    height: 190,
+    borderRadius: 95,
+    backgroundColor: 'rgba(5, 150, 105, 0.28)',
+    top: -75,
+    right: -55,
+  },
+
+  headerCircleTwo: {
+    position: 'absolute',
+    width: 135,
+    height: 135,
+    borderRadius: 70,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    bottom: -45,
+    left: -35,
+  },
+
+  glassIconButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+
+  tabBar: {
+    backgroundColor: '#fff',
+    elevation: 0,
+    borderBottomWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+
+  tabIndicator: {
+    backgroundColor: '#193B6B',
+    height: 3,
+  },
+
+  tabTitle: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+
+  tabViewContent: {
+    flex: 1,
+    width,
+  },
+
+  scrollPadding: {
+    padding: 20,
+  },
+
+  subTabContainer: {
+    flexDirection: 'row-reverse',
+    backgroundColor: '#f1f5f9',
+    margin: 15,
+    borderRadius: 12,
+    padding: 4,
+  },
+
+  subTabItem: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+
+  subTabActive: {
+    backgroundColor: '#fff',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+  },
+
+  subTabText: {
+    fontSize: 14,
+    color: '#8296B1',
+    fontWeight: '600',
+  },
+
+  subTextActive: {
+    color: '#193B6B',
+    fontWeight: 'bold',
+  },
+
+  sectionHeading: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#193B6B',
+    textAlign: 'right',
+    marginBottom: 15,
+  },
+
+  nutritionCard: {
+    backgroundColor: '#fff',
+    borderRadius: 25,
+    overflow: 'hidden',
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+  },
+
+  planHeader: {
+    backgroundColor: '#193B6B',
+    padding: 15,
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  planTitle: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+
+  planBody: {
+    padding: 20,
+  },
+
+  dateInfoContainer: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: '#E9FAFB',
+    borderRadius: 15,
+    padding: 10,
+    marginBottom: 15,
+  },
+
+  dateSubBox: {
+    alignItems: 'center',
+  },
+
+  dateLabelText: {
+    fontSize: 11,
+    color: '#26CDD6',
+    fontWeight: 'bold',
+  },
+
+  dateValueText: {
+    fontSize: 13,
+    color: '#193B6B',
+    fontWeight: '800',
+  },
+
+  descriptionSection: {
+    backgroundColor: '#f8fafc',
+    padding: 12,
+    borderRadius: 12,
+    borderRightWidth: 4,
+    borderRightColor: '#26CDD6',
+    marginBottom: 15,
+  },
+
+  descTitle: {
+    fontSize: 12,
+    color: '#8296B1',
+    fontWeight: 'bold',
+    textAlign: 'right',
+  },
+
+  descContent: {
+    fontSize: 14,
+    color: '#193B6B',
+    textAlign: 'right',
+    marginTop: 4,
+    lineHeight: 20,
+  },
+
+  infoBox: {
+    flexDirection: 'row-reverse',
+    marginBottom: 15,
+  },
+
+  infoLabel: {
+    fontSize: 13,
+    color: '#8296B1',
+    textAlign: 'right',
+  },
+
+  infoTextValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#193B6B',
+    textAlign: 'right',
+  },
+
+  mealBox: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    marginBottom: 12,
+    backgroundColor: '#fafafa',
+    padding: 10,
+    borderRadius: 12,
+  },
+
+  mealIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  mealLabel: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    textAlign: 'right',
+  },
+
+  mealContent: {
+    fontSize: 14,
+    color: '#193B6B',
+    textAlign: 'right',
+    marginTop: 2,
+  },
+
+  sessionCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 15,
+    marginBottom: 15,
+    elevation: 3,
+    borderRightWidth: 6,
+    borderRightColor: '#193B6B',
+  },
+
+  sessionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+
+  sessionDateBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+
+  sessionDate: {
+    fontSize: 13,
+    color: '#8296B1',
+    marginLeft: 5,
+  },
+
+  sessionId: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#193B6B',
+  },
+
+  sessionStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 8,
+    gap: 3,
+  },
+
+  sessionStatusText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+
+  sessionMetricsRow: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-around',
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 10,
+  },
+
+  sessionMetricBox: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 3,
+  },
+
+  sessionMetricDivider: {
+    width: 1,
+    backgroundColor: '#e2e8f0',
+  },
+
+  sessionTapHint: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+
+  sessionTapHintText: {
+    fontSize: 11,
+    color: '#8296B1',
+    marginRight: 2,
+  },
+
+  sessionCardActive: {
+    borderWidth: 2,
+    borderColor: '#A32D2F',
+    backgroundColor: '#FBEAEA',
+  },
+
+  activeSessionBanner: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FBEAEA',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+
+  activeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#A32D2F',
+  },
+
+  activeSessionText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#A32D2F',
+  },
+
+  metricLabel: {
+    fontSize: 11,
+    color: '#8296B1',
+  },
+
+  metricValue: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#193B6B',
+  },
+
+  emptyState: {
+    alignItems: 'center',
+    marginTop: 50,
+  },
+
+  emptyText: {
+    color: '#8296B1',
+    textAlign: 'center',
+    marginTop: 10,
+  },
+
+  prescriptionCard: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 15,
+    marginBottom: 15,
+    elevation: 3,
+    borderRightWidth: 5,
+    borderRightColor: '#26CDD6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+
+  prescriptionHeader: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  prescriptionDoctor: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#193B6B',
+  },
+
+  prescriptionDate: {
+    fontSize: 13,
+    color: '#8296B1',
+  },
+
+  drugItem: {
+    backgroundColor: '#f8fafc',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+
+  drugNameRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+
+  drugName: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#193B6B',
+    marginRight: 8,
+  },
+
+  drugInstructions: {
+    fontSize: 14,
+    color: '#8296B1',
+    textAlign: 'right',
+  },
+
+  reportCard: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 16,
+    marginBottom: 15,
+    elevation: 3,
+    borderLeftWidth: 4,
+    borderLeftColor: '#193B6B',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+
+  reportHeader: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+
+  reportTitleRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+  },
+
+  reportTitle: {
+    fontSize: 17,
+    fontWeight: 'bold',
+    color: '#193B6B',
+    marginRight: 8,
+  },
+
+  reportDate: {
+    fontSize: 13,
+    color: '#8296B1',
+  },
+
+  reportContent: {
+    marginBottom: 15,
+  },
+
+  reportDetail: {
+    fontSize: 15,
+    color: '#8296B1',
+    textAlign: 'right',
+    marginBottom: 4,
+  },
+
+  boldLabel: {
+    fontWeight: 'bold',
+    color: '#193B6B',
+  },
+
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    alignSelf: 'flex-end',
+    marginTop: 4,
+  },
+
+  statusText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+
+  downloadBtn: {
+    backgroundColor: '#193B6B',
+    borderRadius: 10,
+    marginTop: 10,
+    height: 48,
+  },
+
+  bookingPrimaryBtn: {
+    backgroundColor: '#193B6B',
+    flexDirection: 'row-reverse',
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#193B6B',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+
+  bookingPrimaryBtnText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: 'bold',
+    marginRight: 10,
+  },
+
+  apptCardSimple: {
+    flexDirection: 'row-reverse',
+    backgroundColor: '#fff',
+    padding: 15,
+    borderRadius: 15,
+    marginBottom: 12,
+    borderRightWidth: 5,
+    borderRightColor: '#26CDD6',
+    elevation: 2,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+  },
+
+  apptCardIcon: {
+    backgroundColor: '#E9FAFB',
+    padding: 10,
+    borderRadius: 12,
+    marginLeft: 15,
+  },
+
+  apptCardInfo: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+
+  apptCardDoc: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#193B6B',
+    marginBottom: 4,
+    textAlign: 'right',
+    width: '100%',
+  },
+
+  apptCardRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+  },
+
+  apptCardDetail: {
+    fontSize: 13,
+    color: '#8296B1',
+    marginRight: 4,
+  },
+
+  emptyApptBox: {
+    padding: 30,
+    alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 20,
+    marginTop: 10,
+  },
+
+  ufStatsCard: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    backgroundColor: '#E9FAFB',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#BCEFF3',
+  },
+  ufIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#E9FAFB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
+  ufStatsTitle: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#26CDD6',
+    textAlign: 'right',
+  },
+  ufStatsDesc: {
+    fontSize: 12,
+    color: '#26CDD6',
+    textAlign: 'right',
+    marginTop: 2,
+  },
+  ufValueBox: {
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  ufStatsValue: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#26CDD6',
+  },
+  ufStatsUnit: {
+    fontSize: 11,
+    color: '#BCEFF3',
+    fontWeight: 'bold',
+  },
+
+  completedApptCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
+    borderRightWidth: 4,
+    borderRightColor: '#26CDD6',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    width: '100%',
+  },
+  completedApptHeader: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  completedApptDocRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  completedApptAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F1FCFD',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  completedApptDocName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#193B6B',
+    textAlign: 'right',
+  },
+  completedApptType: {
+    fontSize: 12,
+    color: '#8296B1',
+    fontWeight: '600',
+    textAlign: 'right',
+    marginTop: 2,
+  },
+  completedApptBadge: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F1FCFD',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  completedApptBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#26CDD6',
+  },
+  completedApptDateRow: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 14,
+  },
+  completedApptDateItem: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 5,
+  },
+  completedApptDateText: {
+    fontSize: 13,
+    color: '#8296B1',
+    fontWeight: '600',
+  },
+  cardFooter: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    paddingTop: 10,
+    marginTop: 12,
+    gap: 4,
+  },
+  viewDetailsText: {
+    fontSize: 13,
+    color: '#26CDD6',
+    fontWeight: '700',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#DE1A1C',
+    borderRadius: 12,
+    minWidth: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  notificationBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+});
+
+const weightLockStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  sheet: {
+    backgroundColor: '#fff',
+    width: '100%',
+    borderRadius: 24,
+    padding: 24,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+  },
+  iconWrap: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  iconCircle: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: '#FBEAEA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#FBEAEA',
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#193B6B',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  subtitle: {
+    fontSize: 13,
+    color: '#8296B1',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  sessionInfo: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    alignItems: 'center',
+    gap: 6,
+  },
+  sessionInfoText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#8296B1',
+  },
+  weightBeforeText: {
+    fontSize: 13,
+    color: '#8296B1',
+  },
+  inputRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderWidth: 2,
+    borderColor: '#e2e8f0',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    height: 58,
+    gap: 10,
+  },
+  inputErr: {
+    borderColor: '#DE1A1C',
+  },
+  input: {
+    flex: 1,
+    textAlign: 'right',
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#193B6B',
+  },
+  unit: {
+    color: '#8296B1',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  errText: {
+    color: '#DE1A1C',
+    fontSize: 13,
+    textAlign: 'right',
+    marginTop: 8,
+    fontWeight: '600',
+  },
+  saveBtn: {
+    backgroundColor: '#26CDD6',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    padding: 16,
+    borderRadius: 14,
+    marginTop: 20,
+    elevation: 3,
+  },
+  saveBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+});

@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Medikidney",
+    "slug": "medikidney-app",
+    "version": "1.0.0",
+    "scheme": "medikidney",
+    "orientation": "portrait",
+    "icon": "./assets/project-logo.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/project-logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/project-logo.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.majed.medikidney",
+      "googleServicesFile": "./google-services.json",
+      "softwareKeyboardLayoutMode": "pan"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": ["@react-native-community/datetimepicker", "expo-font", "expo-navigation-bar"],
+    "extra": {
+      "eas": {
+        "projectId": "db1d55b0-3193-4b75-b568-cc57c3faea0c"
+      }
+    },
+    "owner": "ibraheemjaw"
+  }
+}

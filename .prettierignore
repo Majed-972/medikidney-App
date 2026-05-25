@@ -1,0 +1,9 @@
+node_modules/
+android/
+.vscode/
+.expo/
+.idea/
+*.log
+*.lock
+**/build/
+**/dist/
